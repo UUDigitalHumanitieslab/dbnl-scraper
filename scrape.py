@@ -1,5 +1,6 @@
 import codecs
 import re
+import os
 
 import requests
 from bs4 import BeautifulSoup
@@ -10,34 +11,33 @@ PAGE_NUMBER = re.compile(r"""
     (.*?)       # matches anything (lazily)
     \]          # matches the closing bracket
 """, re.X)
+OUT_FOLDER = 'data'
 
 
-def scrape_page(page):
+def scrape_page(page, folder, current_file=None):
     """
     Scrapes a single page. Loops over all contentholder elements to find pages.
+    Returns the filename of the last page worked with.
     """
     soup = BeautifulSoup(page, 'html.parser')
-    current_file = None
-    for ch in soup.find_all(class_='contentholder'):
+    for ch in soup.find_all('div', class_='contentholder'):
         if ch.contents:
-
             first_child = ch.contents[0]
-            if first_child.name == 'div' and first_child['class'][0] == 'pb':
-                filename = PAGE_NUMBER.match(first_child.text).group(1).replace('*', 'x').replace('.', '')
-                if current_file:
-                    current_file.close()
-                current_file = codecs.open('data/' + filename + '.txt', 'wb')
+            if first_child.name == 'div':
+                if 'pb' in first_child['class']:
+                    current_file = PAGE_NUMBER.match(first_child.text).group(1).replace('*', 'x').replace('.', '')
+                    continue
 
-                next_row = first_child.find_parent('tr').next_sibling.find(class_='contentholder')
-                for child in next_row.children:
-                    if child.name in ['h1', 'h2', 'h3', 'p']:
-                        write_line(child, current_file)
-                    # Special handlers for poems
-                    if child.name == 'div' and child['class'][0] in ['poem', 'poem-small-margins']:
-                        write_poem(child, current_file)
+            if current_file:
+                with codecs.open(os.path.join(folder, current_file + '.txt'), 'ab') as out_file:
+                    for child in ch.children:
+                        if child.name in ['h1', 'h2', 'h3', 'h4', 'p']:
+                            write_line(child, out_file)
+                        # Special handlers for poems
+                        if child.name == 'div' and child['class'][0] in ['poem', 'poem-small-margins']:
+                            write_poem(child, out_file)
 
-    if current_file:
-        current_file.close()
+    return current_file
 
 
 def strip_encode(line):
@@ -71,11 +71,29 @@ if __name__ == "__main__":
 
     # Loop over all URLs and scrape the pages
     processed = 0
+    chapter_nr = 0
+    section_nr = 0
+    current_folder = None
+    previous_file = None
     for p in toc.parent.next_siblings:
         if p.find('a') != -1:
-            url = p.find('a')['href']
-            print 'Now processing {}'.format(BASE_URL + url)
-            scrape_page(requests.get(BASE_URL + url).content)
+            a = p.find('a')
+            url = BASE_URL + a['href']
+
+            if 'head2' in a['class']:
+                chapter_nr += 1
+                section_nr = 0
+                current_folder = os.path.join(OUT_FOLDER, 'h{}'.format(chapter_nr))
+                previous_file = None
+            elif 'head3' in a['class']:
+                section_nr += 1
+                current_folder = os.path.join(OUT_FOLDER, 'h{}'.format(chapter_nr), 'c{}'.format(section_nr))
+
+            if not os.path.exists(current_folder):
+                os.makedirs(current_folder)
+
+            print 'Now processing {}'.format(url)
+            previous_file = scrape_page(requests.get(url).content, current_folder, previous_file)
             processed += 1
-            if processed == 20:
+            if processed == 5:  # prevent scraping the whole database on the first try :-)
                 break
