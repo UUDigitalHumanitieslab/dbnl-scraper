@@ -5,13 +5,16 @@ import os
 import requests
 from bs4 import BeautifulSoup, element
 
+# Change below settings to your specific settings.
 BASE_URL = 'http://www.dbnl.org/tekst/mand001schi01_01/'
+MAX_PAGES = 5
+OUT_FOLDER = 'data'
+
 PAGE_NUMBER = re.compile(r"""
     \[          # matches the opening bracket
     (.*?)       # matches anything (lazily)
     \]          # matches the closing bracket
 """, re.X)
-OUT_FOLDER = 'data'
 
 
 def scrape_page(page, folder, current_file=None):
@@ -105,5 +108,5 @@ if __name__ == "__main__":
                 print 'Now processing {}'.format(url)
                 previous_file = scrape_page(requests.get(url).content, current_folder, previous_file)
                 processed += 1
-        if processed == 5:  # prevent scraping the whole database on the first try :-)
+        if MAX_PAGES and processed == MAX_PAGES:  # prevent scraping the whole database on the first try :-)
             break
