@@ -1,9 +1,12 @@
 import codecs
+from collections import defaultdict
 import re
 import os
 
 import requests
 from bs4 import BeautifulSoup, element
+
+from utils import UnicodeWriter
 
 # Change below settings to your specific settings.
 BASE_URL = 'http://www.dbnl.org/tekst/mand001schi01_01/'
@@ -17,7 +20,7 @@ PAGE_NUMBER = re.compile(r"""
 """, re.X)
 
 
-def scrape_page(page, folder, current_file=None):
+def scrape_page(page, folder, current_page_nr=None):
     """
     Scrapes a single page. Loops over all contentholder elements to find pages.
     Returns the filename of the last page worked with.
@@ -28,10 +31,10 @@ def scrape_page(page, folder, current_file=None):
             first_child = ch.contents[0]
             if first_child.name == 'div':
                 if 'pb' in first_child['class']:
-                    current_file = PAGE_NUMBER.match(first_child.text).group(1).replace('*', 'x').replace('.', '')
+                    current_page_nr = PAGE_NUMBER.match(first_child.text).group(1).replace('*', 'x').replace('.', '')
                     continue
 
-            if current_file:
+            if current_page_nr:
                 lines = []
                 # Retrieve the text elements from the page
                 for child in ch.children:
@@ -43,11 +46,17 @@ def scrape_page(page, folder, current_file=None):
 
                 # Write the lines to an output file
                 if lines:
-                    with codecs.open(os.path.join(folder, current_file + '.txt'), 'ab') as out_file:
+                    with open('data/pages.csv', 'ab') as out_file:
+                        csv_writer = UnicodeWriter(out_file)
+                        csv_writer.writerow(['chapter', 'nr', 'title'])
+                        lines_stripped = [line.text.strip() for line in lines]
+                        csv_writer.writerow([folder, current_page_nr, '<br>'.join(lines_stripped)])
+
+                    with codecs.open(os.path.join(folder, current_page_nr + '.txt'), 'ab') as out_file:
                         for line in lines:
                             write_line(line, out_file)
 
-    return current_file
+    return current_page_nr
 
 
 def strip_encode(line):
@@ -77,6 +86,25 @@ def get_poem(poem):
             lines.append(line)
     return lines
 
+
+def parts_to_csv(parts):
+    with open('data/parts.csv', 'wb') as f:
+        csv_writer = UnicodeWriter(f)
+        csv_writer.writerow(['book', 'nr', 'title'])
+        for n, part in enumerate(parts):
+            csv_writer.writerow(['', str(n), part])
+
+
+def chapters_to_csv(chapters):
+    with open('data/chapters.csv', 'wb') as f:
+        csv_writer = UnicodeWriter(f)
+        csv_writer.writerow(['part', 'nr', 'title'])
+        for part, c in chapters.items():
+            print part, c
+            for chapter in c:
+                csv_writer.writerow([part, str(1), chapter])
+
+
 if __name__ == "__main__":
     # Retrieve the table of contents
     soup = BeautifulSoup(requests.get(BASE_URL).content, 'html.parser')
@@ -84,8 +112,9 @@ if __name__ == "__main__":
 
     # Loop over all URLs and scrape the pages
     processed = 0
-    chapter_nr = 0
-    section_nr = 0
+    parts = []
+    chapters = defaultdict(list)
+    pages = defaultdict(list)
     current_folder = None
     previous_file = None
     for p in toc.parent.next_siblings:
@@ -94,19 +123,24 @@ if __name__ == "__main__":
                 url = BASE_URL + a['href']
 
                 if 'head2' in a['class']:
-                    chapter_nr += 1
-                    section_nr = 0
-                    current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(chapter_nr))
-                    previous_file = None
+                    if a.string in parts:
+                        raise ValueError('Part titles not unique!')
+                    parts.append(a.string)
+                    current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(len(parts)))
+                    previous_page_nr = None
                 elif 'head3' in a['class']:
-                    section_nr += 1
-                    current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(chapter_nr), 'c{0:02d}'.format(section_nr))
+                    chapters[parts[-1]].append(a.string)
+                    current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(len(chapters)), 'c{0:02d}'.format(len(parts)))
 
                 if not os.path.exists(current_folder):
                     os.makedirs(current_folder)
 
                 print 'Now processing {}'.format(url)
-                previous_file = scrape_page(requests.get(url).content, current_folder, previous_file)
+                previous_page_nr = scrape_page(requests.get(url).content, current_folder, previous_page_nr)
                 processed += 1
         if MAX_PAGES and processed == MAX_PAGES:  # prevent scraping the whole database on the first try :-)
             break
+
+    parts_to_csv(parts)
+    chapters_to_csv(chapters)
+
