@@ -32,3 +32,20 @@ class UnicodeWriter:
     def writerows(self, rows):
         for row in rows:
             self.writerow(row)
+
+
+def strip_encode(line):
+    """
+    Strips a line and encodes it as UTF-8.
+    """
+    return line.strip().encode('utf-8')
+
+
+def write_line(line, out_file):
+    """
+    Writes a line to the given out_file, and ends it with a new line.
+    """
+    line = strip_encode(line.text)
+    if line:
+        out_file.write(line)
+        out_file.write('\n')

@@ -6,7 +6,7 @@ import os
 import requests
 from bs4 import BeautifulSoup, element
 
-from utils import UnicodeWriter
+from utils import UnicodeWriter, write_line
 
 # Change below settings to your specific settings.
 BASE_URL = 'http://www.dbnl.org/tekst/mand001schi01_01/'
@@ -25,6 +25,7 @@ def scrape_page(page, folder, current_page_nr=None):
     Scrapes a single page. Loops over all contentholder elements to find pages.
     Returns the filename of the last page worked with.
     """
+    pages = defaultdict(list)
     soup = BeautifulSoup(page, 'html.parser')
     for ch in soup.find_all('div', class_='contentholder'):
         if ch.contents:
@@ -46,34 +47,13 @@ def scrape_page(page, folder, current_page_nr=None):
 
                 # Write the lines to an output file
                 if lines:
-                    with open('data/pages.csv', 'ab') as out_file:
-                        csv_writer = UnicodeWriter(out_file)
-                        csv_writer.writerow(['chapter', 'nr', 'title'])
-                        lines_stripped = [line.text.strip() for line in lines]
-                        csv_writer.writerow([folder, current_page_nr, '<br>'.join(lines_stripped)])
+                    pages[current_page_nr].extend(lines)
 
                     with codecs.open(os.path.join(folder, current_page_nr + '.txt'), 'ab') as out_file:
                         for line in lines:
                             write_line(line, out_file)
 
-    return current_page_nr
-
-
-def strip_encode(line):
-    """
-    Strips a line and encodes it as UTF-8.
-    """
-    return line.strip().encode('utf-8')
-
-
-def write_line(line, out_file):
-    """
-    Writes a line to the given out_file, and ends it with a new line.
-    """
-    line = strip_encode(line.text)
-    if line:
-        out_file.write(line)
-        out_file.write('\n')
+    return pages, current_page_nr
 
 
 def get_poem(poem):
@@ -89,34 +69,39 @@ def get_poem(poem):
 
 def parts_to_csv(parts):
     with open('data/parts.csv', 'wb') as f:
-        csv_writer = UnicodeWriter(f)
+        f.write(u'\uFEFF'.encode('utf-8'))  # the UTF-8 BOM to hint Excel we are using that...
+        csv_writer = UnicodeWriter(f, delimiter=';')
         csv_writer.writerow(['book', 'nr', 'title'])
-        for n, part in enumerate(parts):
-            csv_writer.writerow(['', str(n), part])
+        for n, part in enumerate(parts, start=1):
+            csv_writer.writerow(['Het schilder-boeck', str(n), part])
 
 
 def chapters_to_csv(chapters):
     with open('data/chapters.csv', 'wb') as f:
-        csv_writer = UnicodeWriter(f)
+        f.write(u'\uFEFF'.encode('utf-8'))  # the UTF-8 BOM to hint Excel we are using that...
+        csv_writer = UnicodeWriter(f, delimiter=';')
         csv_writer.writerow(['part', 'nr', 'title'])
         for part, c in chapters.items():
-            print part, c
-            for chapter in c:
-                csv_writer.writerow([part, str(1), chapter])
+            for n, chapter in enumerate(c, start=1):
+                csv_writer.writerow([part, str(n), chapter])
 
 
-if __name__ == "__main__":
-    # Retrieve the table of contents
-    soup = BeautifulSoup(requests.get(BASE_URL).content, 'html.parser')
-    toc = soup.find('h2', {'class': 'inhoud'})
+def pages_to_csv(pages):
+    with open('data/pages.csv', 'wb') as f:
+        f.write(u'\uFEFF'.encode('utf-8'))  # the UTF-8 BOM to hint Excel we are using that...
+        csv_writer = UnicodeWriter(f, delimiter=';')
+        csv_writer.writerow(['chapter', 'nr', 'title'])
+        for page_nr, lines in pages.items():
+            lines_stripped = [line.text.strip().replace('\n', '<br><br>') for line in lines]
+            csv_writer.writerow(['', page_nr, '<br>'.join(lines_stripped)])
 
-    # Loop over all URLs and scrape the pages
-    processed = 0
+
+def scrape_pages(toc):
     parts = []
     chapters = defaultdict(list)
     pages = defaultdict(list)
     current_folder = None
-    previous_file = None
+    processed = 0
     for p in toc.parent.next_siblings:
         if type(p) == element.Tag:
             for a in p.find_all('a'):
@@ -130,17 +115,31 @@ if __name__ == "__main__":
                     previous_page_nr = None
                 elif 'head3' in a['class']:
                     chapters[parts[-1]].append(a.string)
-                    current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(len(chapters)), 'c{0:02d}'.format(len(parts)))
+                    current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(len(chapters)),
+                                                  'c{0:02d}'.format(len(parts)))
 
                 if not os.path.exists(current_folder):
                     os.makedirs(current_folder)
 
                 print 'Now processing {}'.format(url)
-                previous_page_nr = scrape_page(requests.get(url).content, current_folder, previous_page_nr)
+                scraped_pages, previous_page_nr = scrape_page(requests.get(url).content, current_folder,
+                                                              previous_page_nr)
+                pages.update(scraped_pages)
                 processed += 1
         if MAX_PAGES and processed == MAX_PAGES:  # prevent scraping the whole database on the first try :-)
             break
 
+    return parts, chapters, pages
+
+
+if __name__ == "__main__":
+    # Retrieve the table of contents
+    soup = BeautifulSoup(requests.get(BASE_URL).content, 'html.parser')
+    toc = soup.find('h2', {'class': 'inhoud'})
+
+    # Loop over all URLs and scrape the pages
+    parts, chapters, pages = scrape_pages(toc)
+
     parts_to_csv(parts)
     chapters_to_csv(chapters)
-
+    pages_to_csv(pages)
