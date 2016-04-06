@@ -6,10 +6,12 @@ import os
 import requests
 from bs4 import BeautifulSoup, element
 
+from models import Page
 from utils import UnicodeWriter, write_line
 
 # Change below settings to your specific settings.
-BASE_URL = 'http://www.dbnl.org/tekst/mand001schi01_01/'
+DBNL_URL = 'http://www.dbnl.org'
+BASE_URL = DBNL_URL + '/tekst/mand001schi01_01/'
 MAX_PAGES = 5
 OUT_FOLDER = 'data'
 
@@ -20,12 +22,11 @@ PAGE_NUMBER = re.compile(r"""
 """, re.X)
 
 
-def scrape_page(page, folder, current_page_nr=None):
+def scrape_page(scraped_pages, page, folder, current_page_nr=None):
     """
     Scrapes a single page. Loops over all contentholder elements to find pages.
     Returns the filename of the last page worked with.
     """
-    pages = defaultdict(list)
     soup = BeautifulSoup(page, 'html.parser')
     for ch in soup.find_all('div', class_='contentholder'):
         if ch.contents:
@@ -33,6 +34,7 @@ def scrape_page(page, folder, current_page_nr=None):
             if first_child.name == 'div':
                 if 'pb' in first_child['class']:
                     current_page_nr = PAGE_NUMBER.match(first_child.text).group(1).replace('*', 'x').replace('.', '')
+                    current_original = first_child.a['href']
                     continue
 
             if current_page_nr:
@@ -47,13 +49,16 @@ def scrape_page(page, folder, current_page_nr=None):
 
                 # Write the lines to an output file
                 if lines:
-                    pages[current_page_nr].extend(lines)
+                    if not current_page_nr in scraped_pages:
+                        p = Page(current_page_nr, current_original, folder)
+                        scraped_pages[current_page_nr] = p
+                    scraped_pages[current_page_nr].add_lines(lines)
 
                     with codecs.open(os.path.join(folder, current_page_nr + '.txt'), 'ab') as out_file:
                         for line in lines:
                             write_line(line, out_file)
 
-    return pages, current_page_nr
+    return scraped_pages, current_page_nr
 
 
 def get_poem(poem):
@@ -90,16 +95,20 @@ def pages_to_csv(pages):
     with open('data/pages.csv', 'wb') as f:
         f.write(u'\uFEFF'.encode('utf-8'))  # the UTF-8 BOM to hint Excel we are using that...
         csv_writer = UnicodeWriter(f, delimiter=';')
-        csv_writer.writerow(['chapter', 'nr', 'title'])
-        for page_nr, lines in pages.items():
-            lines_stripped = [line.text.strip().replace('\n', '<br><br>') for line in lines]
-            csv_writer.writerow(['', page_nr, '<br>'.join(lines_stripped)])
+        csv_writer.writerow(['chapter', 'title', 'link', 'body'])
+        for page_nr, page in pages.items():
+            # Strip all lines and replace new lines by <br> tags
+            lines_stripped = [line.text.strip().replace('\n', '<br>') for line in page.lines]
+            csv_writer.writerow([page.chapter,
+                                 page_nr,
+                                 DBNL_URL + page.link_to_original,
+                                 '<br>'.join(lines_stripped)])
 
 
 def scrape_pages(toc):
     parts = []
     chapters = defaultdict(list)
-    pages = defaultdict(list)
+    scraped_pages = defaultdict(Page)
     current_folder = None
     processed = 0
     for p in toc.parent.next_siblings:
@@ -122,14 +131,15 @@ def scrape_pages(toc):
                     os.makedirs(current_folder)
 
                 print 'Now processing {}'.format(url)
-                scraped_pages, previous_page_nr = scrape_page(requests.get(url).content, current_folder,
+                scraped_pages, previous_page_nr = scrape_page(scraped_pages,
+                                                              requests.get(url).content,
+                                                              current_folder,
                                                               previous_page_nr)
-                pages.update(scraped_pages)
                 processed += 1
         if MAX_PAGES and processed == MAX_PAGES:  # prevent scraping the whole database on the first try :-)
             break
 
-    return parts, chapters, pages
+    return parts, chapters, scraped_pages
 
 
 if __name__ == "__main__":
