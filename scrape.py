@@ -12,7 +12,7 @@ from utils import UnicodeWriter, write_line
 # Change below settings to your specific settings.
 DBNL_URL = 'http://www.dbnl.org'
 BASE_URL = DBNL_URL + '/tekst/mand001schi01_01/'
-MAX_PAGES = 5
+MAX_PAGES = 10
 OUT_FOLDER = 'data'
 
 PAGE_NUMBER = re.compile(r"""
@@ -22,7 +22,7 @@ PAGE_NUMBER = re.compile(r"""
 """, re.X)
 
 
-def scrape_page(scraped_pages, page, folder, current_page_nr=None):
+def scrape_page(scraped_pages, page, folder, current_chapter, current_page_nr=None):
     """
     Scrapes a single page. Loops over all contentholder elements to find pages.
     Returns the filename of the last page worked with.
@@ -50,7 +50,7 @@ def scrape_page(scraped_pages, page, folder, current_page_nr=None):
                 # Write the lines to an output file
                 if lines:
                     if not current_page_nr in scraped_pages:
-                        p = Page(current_page_nr, current_original, folder)
+                        p = Page(current_page_nr, current_original, current_chapter)
                         scraped_pages[current_page_nr] = p
                     scraped_pages[current_page_nr].add_lines(lines)
 
@@ -87,6 +87,8 @@ def chapters_to_csv(chapters):
         csv_writer = UnicodeWriter(f, delimiter=';')
         csv_writer.writerow(['part', 'nr', 'title'])
         for part, c in chapters.items():
+            # For each part, write an introduction chapter
+            csv_writer.writerow([part, str(0), part])
             for n, chapter in enumerate(c, start=1):
                 csv_writer.writerow([part, str(n), chapter])
 
@@ -95,11 +97,14 @@ def pages_to_csv(pages):
     with open('data/pages.csv', 'wb') as f:
         f.write(u'\uFEFF'.encode('utf-8'))  # the UTF-8 BOM to hint Excel we are using that...
         csv_writer = UnicodeWriter(f, delimiter=';')
-        csv_writer.writerow(['chapter', 'title', 'link', 'body'])
-        for page_nr, page in pages.items():
+        csv_writer.writerow(['chapter', 'title', 'pagenumber', 'original', 'body'])
+        n = 0
+        for page_nr, page in sorted(pages.items(), key=lambda x: x[1].link_to_original):
+            n += 1
             # Strip all lines and replace new lines by <br> tags
             lines_stripped = [line.text.strip().replace('\n', '<br>') for line in page.lines]
             csv_writer.writerow([page.chapter,
+                                 str(n) + '|' + page_nr,
                                  page_nr,
                                  DBNL_URL + page.link_to_original,
                                  '<br>'.join(lines_stripped)])
@@ -117,15 +122,17 @@ def scrape_pages(toc):
                 url = BASE_URL + a['href']
 
                 if 'head2' in a['class']:
-                    if a.string in parts:
+                    current_chapter = a.string
+                    if current_chapter in parts:
                         raise ValueError('Part titles not unique!')
-                    parts.append(a.string)
+                    parts.append(current_chapter)
                     current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(len(parts)))
                     previous_page_nr = None
                 elif 'head3' in a['class']:
-                    chapters[parts[-1]].append(a.string)
-                    current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(len(chapters)),
-                                                  'c{0:02d}'.format(len(parts)))
+                    current_chapter = a.string
+                    chapters[parts[-1]].append(current_chapter)
+                    current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(len(parts)),
+                                                  'c{0:02d}'.format(len(chapters[parts[-1]])))
 
                 if not os.path.exists(current_folder):
                     os.makedirs(current_folder)
@@ -134,6 +141,7 @@ def scrape_pages(toc):
                 scraped_pages, previous_page_nr = scrape_page(scraped_pages,
                                                               requests.get(url).content,
                                                               current_folder,
+                                                              current_chapter,
                                                               previous_page_nr)
                 processed += 1
         if MAX_PAGES and processed == MAX_PAGES:  # prevent scraping the whole database on the first try :-)
