@@ -45,7 +45,7 @@ def write_line(line, out_file):
     """
     Writes a line to the given out_file, and ends it with a new line.
     """
-    line = strip_encode(line.text)
-    if line:
-        out_file.write(line)
+    result = strip_encode(line.text)
+    if result:
+        out_file.write(result)
         out_file.write('\n')

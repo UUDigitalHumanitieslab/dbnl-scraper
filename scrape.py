@@ -11,6 +11,7 @@ from utils import UnicodeWriter, write_line
 
 # Change below settings to your specific settings.
 DBNL_URL = 'http://www.dbnl.org'
+DBNL_BOOK_TITLE = 'Het schilder-boeck'
 BASE_URL = DBNL_URL + '/tekst/mand001schi01_01/'
 MAX_PAGES = 10
 OUT_FOLDER = 'data'
@@ -22,7 +23,7 @@ PAGE_NUMBER = re.compile(r"""
 """, re.X)
 
 
-def scrape_page(scraped_pages, page, folder, current_chapter, current_page_nr=None):
+def scrape_page(scraped_pages, page, folder, current_part, current_chapter, current_page_nr=None):
     """
     Scrapes a single page. Loops over all contentholder elements to find pages.
     Returns the filename of the last page worked with.
@@ -49,8 +50,8 @@ def scrape_page(scraped_pages, page, folder, current_chapter, current_page_nr=No
 
                 # Write the lines to an output file
                 if lines:
-                    if not current_page_nr in scraped_pages:
-                        p = Page(current_page_nr, current_original, current_chapter)
+                    if current_page_nr not in scraped_pages:
+                        p = Page(current_page_nr, current_original, current_part, current_chapter)
                         scraped_pages[current_page_nr] = p
                     scraped_pages[current_page_nr].add_lines(lines)
 
@@ -78,7 +79,7 @@ def parts_to_csv(parts):
         csv_writer = UnicodeWriter(f, delimiter=';')
         csv_writer.writerow(['book', 'nr', 'title'])
         for n, part in enumerate(parts, start=1):
-            csv_writer.writerow(['Het schilder-boeck', str(n), part])
+            csv_writer.writerow([DBNL_BOOK_TITLE, str(n), part])
 
 
 def chapters_to_csv(chapters):
@@ -97,14 +98,17 @@ def pages_to_csv(pages):
     with open('data/pages.csv', 'wb') as f:
         f.write(u'\uFEFF'.encode('utf-8'))  # the UTF-8 BOM to hint Excel we are using that...
         csv_writer = UnicodeWriter(f, delimiter=';')
-        csv_writer.writerow(['chapter', 'title', 'pagenumber', 'original', 'body'])
+        csv_writer.writerow(['book', 'part', 'chapter', 'title', 'pagenumber', 'original', 'body'])
         n = 0
+        # Loop over pages, sort by link to original
         for page_nr, page in sorted(pages.items(), key=lambda x: x[1].link_to_original):
             n += 1
             # Strip all lines and replace new lines by <br> tags
             lines_stripped = [line.text.strip().replace('\n', '<br>') for line in page.lines]
-            csv_writer.writerow([page.chapter,
-                                 str(n) + '|' + page_nr,
+            csv_writer.writerow([DBNL_BOOK_TITLE,
+                                 page.part,
+                                 page.chapter,
+                                 str(n) + ' - ' + page_nr,
                                  page_nr,
                                  DBNL_URL + page.link_to_original,
                                  '<br>'.join(lines_stripped)])
@@ -114,7 +118,10 @@ def scrape_pages(toc):
     parts = []
     chapters = defaultdict(list)
     scraped_pages = defaultdict(Page)
+
     current_folder = None
+    current_part = ''
+    current_chapter = ''
     processed = 0
     for p in toc.parent.next_siblings:
         if type(p) == element.Tag:
@@ -122,10 +129,10 @@ def scrape_pages(toc):
                 url = BASE_URL + a['href']
 
                 if 'head2' in a['class']:
-                    current_chapter = a.string
-                    if current_chapter in parts:
+                    current_part = a.string
+                    if current_part in parts:
                         raise ValueError('Part titles not unique!')
-                    parts.append(current_chapter)
+                    parts.append(current_part)
                     current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(len(parts)))
                     previous_page_nr = None
                 elif 'head3' in a['class']:
@@ -141,6 +148,7 @@ def scrape_pages(toc):
                 scraped_pages, previous_page_nr = scrape_page(scraped_pages,
                                                               requests.get(url).content,
                                                               current_folder,
+                                                              current_part,
                                                               current_chapter,
                                                               previous_page_nr)
                 processed += 1
@@ -158,6 +166,7 @@ if __name__ == "__main__":
     # Loop over all URLs and scrape the pages
     parts, chapters, pages = scrape_pages(toc)
 
+    # Output everything to .csv-files.
     parts_to_csv(parts)
     chapters_to_csv(chapters)
     pages_to_csv(pages)
