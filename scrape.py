@@ -29,12 +29,14 @@ def scrape_page(scraped_pages, page, folder, current_part, current_chapter, curr
     Returns the filename of the last page worked with.
     """
     soup = BeautifulSoup(page, 'html.parser')
+    is_new_page = False
     for ch in soup.find_all('div', class_='contentholder'):
         if ch.contents:
             first_child = ch.contents[0]
             if first_child.name == 'div':
                 if 'pb' in first_child['class']:
                     current_page_nr = PAGE_NUMBER.match(first_child.text).group(1).replace('*', 'x').replace('.', '')
+                    is_new_page = True
                     current_original = first_child.a['href']
                     continue
 
@@ -50,7 +52,7 @@ def scrape_page(scraped_pages, page, folder, current_part, current_chapter, curr
 
                 # Write the lines to an output file
                 if lines:
-                    if current_page_nr not in scraped_pages:
+                    if is_new_page:
                         p = Page(current_page_nr, current_original, current_part, current_chapter)
                         scraped_pages[current_page_nr] = p
                     scraped_pages[current_page_nr].add_lines(lines)
@@ -130,8 +132,7 @@ def scrape_pages(toc):
 
                 if 'head2' in a['class']:
                     current_part = a.string
-                    if current_part in parts:
-                        raise ValueError('Part titles not unique!')
+                    current_chapter = ''
                     parts.append(current_part)
                     current_folder = os.path.join(OUT_FOLDER, 'h{0:02d}'.format(len(parts)))
                     previous_page_nr = None
@@ -145,12 +146,14 @@ def scrape_pages(toc):
                     os.makedirs(current_folder)
 
                 print 'Now processing {}'.format(url)
+
                 scraped_pages, previous_page_nr = scrape_page(scraped_pages,
                                                               requests.get(url).content,
                                                               current_folder,
                                                               current_part,
                                                               current_chapter,
                                                               previous_page_nr)
+
                 processed += 1
         if MAX_PAGES and processed == MAX_PAGES:  # prevent scraping the whole database on the first try :-)
             break
