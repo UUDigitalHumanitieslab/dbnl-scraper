@@ -106,14 +106,14 @@ def pages_to_csv(pages):
         for page_nr, page in sorted(pages.items(), key=lambda x: x[1].link_to_original):
             n += 1
             # Strip all lines and replace new lines by <br> tags
-            lines_stripped = [line.text.strip().replace('\n', '<br>') for line in page.lines]
+            lines_stripped = [line.text.strip() for line in page.lines]
             csv_writer.writerow([DBNL_BOOK_TITLE,
                                  page.part,
                                  page.chapter,
-                                 str(n) + ' - ' + page_nr,
+                                 u'SB{:03d} - {}'.format(n, page_nr),
                                  page_nr,
                                  DBNL_URL + page.link_to_original,
-                                 '<br>'.join(lines_stripped)])
+                                 '\n'.join(lines_stripped)])
 
 
 def scrape_pages(toc):
