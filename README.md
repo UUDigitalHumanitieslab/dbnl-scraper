@@ -1,5 +1,7 @@
 # dbnl-scraper
 
+**OBSOLETE: This has been replaced with a [Corpus Definition in I-analyzer](https://github.com/UUDigitalHumanitieslab/I-analyzer/blob/develop/backend/corpora/dbnl/readme.md)!**
+
 This scraper script allows one to scrape text from [dbnl](http://dbnl.org/), the Dutch digital library for the Arts.
 
 ## Requirements 
